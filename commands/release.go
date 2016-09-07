@@ -69,8 +69,12 @@ With '--include-drafts', include draft releases in the listing.
 	-F, --file <FILE>
 		Read the release title and description from <FILE>.
 
+	-e, --edit
+		Further edit the contents of <FILE> in a text editor before submitting.
+
 	-c, --commitish <TARGET>
-		A SHA, tag, or branch name to attach the release to (default: current branch).
+		A commit SHA or branch name to attach the release to, only used if <TAG>
+		doesn't already exist (default: main branch).
 
 	<TAG>
 		The git tag name for this release.
@@ -104,6 +108,7 @@ hub(1), git-tag(1)
 	flagReleaseIncludeDrafts,
 	flagReleaseShowDownloads,
 	flagReleaseDraft,
+	flagReleaseEdit,
 	flagReleasePrerelease bool
 
 	flagReleaseMessage,
@@ -118,6 +123,7 @@ func init() {
 
 	cmdShowRelease.Flag.BoolVarP(&flagReleaseShowDownloads, "show-downloads", "d", false, "DRAFTS")
 
+	cmdCreateRelease.Flag.BoolVarP(&flagReleaseEdit, "edit", "e", false, "EDIT")
 	cmdCreateRelease.Flag.BoolVarP(&flagReleaseDraft, "draft", "d", false, "DRAFT")
 	cmdCreateRelease.Flag.BoolVarP(&flagReleasePrerelease, "prerelease", "p", false, "PRERELEASE")
 	cmdCreateRelease.Flag.VarP(&flagReleaseAssets, "attach", "a", "ATTACH_ASSETS")
@@ -125,6 +131,7 @@ func init() {
 	cmdCreateRelease.Flag.StringVarP(&flagReleaseFile, "file", "F", "", "FILE")
 	cmdCreateRelease.Flag.StringVarP(&flagReleaseCommitish, "commitish", "c", "", "COMMITISH")
 
+	cmdEditRelease.Flag.BoolVarP(&flagReleaseEdit, "edit", "e", false, "EDIT")
 	cmdEditRelease.Flag.BoolVarP(&flagReleaseDraft, "draft", "d", false, "DRAFT")
 	cmdEditRelease.Flag.BoolVarP(&flagReleasePrerelease, "prerelease", "p", false, "PRERELEASE")
 	cmdEditRelease.Flag.VarP(&flagReleaseAssets, "attach", "a", "ATTACH_ASSETS")
@@ -266,13 +273,6 @@ func createRelease(cmd *Command, args *Args) {
 
 	gh := github.NewClient(project.Host)
 
-	commitish := flagReleaseCommitish
-	if commitish == "" {
-		currentBranch, err := localRepo.CurrentBranch()
-		utils.Check(err)
-		commitish = currentBranch.ShortName()
-	}
-
 	var title string
 	var body string
 	var editor *github.Editor
@@ -280,11 +280,11 @@ func createRelease(cmd *Command, args *Args) {
 	if cmd.FlagPassed("message") {
 		title, body = readMsg(flagReleaseMessage)
 	} else if cmd.FlagPassed("file") {
-		title, body, err = readMsgFromFile(flagReleaseFile)
+		title, body, editor, err = readMsgFromFile(flagReleaseFile, flagReleaseEdit, "RELEASE", "release")
 		utils.Check(err)
 	} else {
 		cs := git.CommentChar()
-		message, err := renderReleaseTpl("Creating", cs, tagName, project.String(), commitish)
+		message, err := renderReleaseTpl("Creating", cs, tagName, project.String(), flagReleaseCommitish)
 		utils.Check(err)
 
 		editor, err := github.NewEditor("RELEASE", "release", message)
@@ -300,7 +300,7 @@ func createRelease(cmd *Command, args *Args) {
 
 	params := &github.Release{
 		TagName:         tagName,
-		TargetCommitish: commitish,
+		TargetCommitish: flagReleaseCommitish,
 		Name:            title,
 		Body:            body,
 		Draft:           flagReleaseDraft,
@@ -367,7 +367,7 @@ func editRelease(cmd *Command, args *Args) {
 	if cmd.FlagPassed("message") {
 		title, body = readMsg(flagReleaseMessage)
 	} else if cmd.FlagPassed("file") {
-		title, body, err = readMsgFromFile(flagReleaseFile)
+		title, body, editor, err = readMsgFromFile(flagReleaseFile, flagReleaseEdit, "RELEASE", "release")
 		utils.Check(err)
 
 		if title == "" {

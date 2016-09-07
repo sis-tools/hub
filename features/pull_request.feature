@@ -25,6 +25,7 @@ Feature: hub pull-request
         assert :base  => 'master',
                :head  => 'Manganeez:master',
                :title => 'here we go'
+        status 201
         json :html_url => "https://github.com/Manganeez/repo/pull/12"
       }
       """
@@ -37,6 +38,7 @@ Feature: hub pull-request
       post('/repos/mislav/coral/pulls') {
         halt 400 if request.content_charset != 'utf-8'
         assert :title => 'ăéñøü'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -59,6 +61,7 @@ Feature: hub pull-request
         halt 400 if request.content_charset != 'utf-8'
         assert :title => 'I <3 encodings',
                :body => 'ăéñøü'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -79,6 +82,7 @@ Feature: hub pull-request
         halt 400 if request.content_charset != 'utf-8'
         assert :title => 'This is somewhat of a longish title that does not get wrapped & references #1234',
                :body => nil
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -86,6 +90,42 @@ Feature: hub pull-request
     When I successfully run `git checkout --quiet -b topic`
     Given I make a commit with message "This is somewhat of a longish title that does not get wrapped & references #1234"
     And the "topic" branch is pushed to "origin/topic"
+    When I successfully run `hub pull-request`
+    Then the output should contain exactly "the://url\n"
+
+  Scenario: Single-commit with pull request template
+    Given the git commit editor is "true"
+    Given the GitHub API server:
+      """
+      post('/repos/mislav/coral/pulls') {
+        halt 400 if request.content_charset != 'utf-8'
+        assert :title => 'Commit title',
+               :body => <<BODY.chomp
+This is the pull request template
+
+Another line of template
+
+Commit body
+BODY
+        status 201
+        json :html_url => "the://url"
+      }
+      """
+    Given I am on the "master" branch pushed to "origin/master"
+    When I successfully run `git checkout --quiet -b topic`
+    And I make a commit with message:
+      """
+      Commit title
+
+      Commit body
+      """
+    And the "topic" branch is pushed to "origin/topic"
+    Given a file named "pull_request_template.md" with:
+      """
+      This is the pull request template
+
+      Another line of template
+      """
     When I successfully run `hub pull-request`
     Then the output should contain exactly "the://url\n"
 
@@ -150,6 +190,7 @@ Feature: hub pull-request
       """
       post('/repos/mislav/coral/pulls') {
         halt 400 unless request.user_agent.include?('Hub')
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -168,6 +209,7 @@ Feature: hub pull-request
       post('/repos/mislav/coral/pulls') {
         assert :title => 'This title comes from vim!',
                :body  => 'This body as well.'
+        status 201
         json :html_url => "https://github.com/mislav/coral/pull/12"
       }
       """
@@ -195,6 +237,7 @@ Feature: hub pull-request
       post('/repos/mislav/coral/pulls') {
         assert :title => 'This title is on the third line',
                :body  => "This body\n\n\nhas multiple\nlines."
+        status 201
         json :html_url => "https://github.com/mislav/coral/pull/12"
       }
       """
@@ -217,6 +260,7 @@ Feature: hub pull-request
       post('/repos/mislav/coral/pulls') {
         assert :title => '# Dat title',
                :body  => 'Dem body.'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -234,6 +278,7 @@ Feature: hub pull-request
         halt 422 if params[:title].include?("fail")
         assert :body => "This title will fail",
                :title => "But this title will prevail"
+        status 201
         json :html_url => "https://github.com/mislav/coral/pull/12"
       }
       """
@@ -264,6 +309,7 @@ Feature: hub pull-request
       post('/repos/mislav/coral/pulls') {
         assert :title => 'Title from file',
                :body  => "Body from file as well.\n\nMultiline, even!"
+        status 201
         json :html_url => "https://github.com/mislav/coral/pull/12"
       }
       """
@@ -279,12 +325,36 @@ Feature: hub pull-request
     Then the output should contain exactly "https://github.com/mislav/coral/pull/12\n"
     And the file ".git/PULLREQ_EDITMSG" should not exist
 
+  Scenario: Edit title and body from file
+    Given the GitHub API server:
+      """
+      post('/repos/mislav/coral/pulls') {
+        assert :title => 'Hello from editor',
+               :body  => "Title from file\n\nBody from file as well."
+        status 201
+        json :html_url => "https://github.com/mislav/coral/pull/12"
+      }
+      """
+    And a file named "pullreq-msg" with:
+      """
+      Title from file
+
+      Body from file as well.
+      """
+    And the text editor adds:
+      """
+      Hello from editor
+      """
+    When I successfully run `hub pull-request -F pullreq-msg --edit`
+    Then the file ".git/PULLREQ_EDITMSG" should not exist
+
   Scenario: Title and body from stdin
     Given the GitHub API server:
       """
       post('/repos/mislav/coral/pulls') {
         assert :title => 'Unix piping is great',
                :body  => 'Just look at this ăéñøü'
+        status 201
         json :html_url => "https://github.com/mislav/coral/pull/12"
       }
       """
@@ -305,6 +375,7 @@ Feature: hub pull-request
       post('/repos/mislav/coral/pulls') {
         assert :title => 'I am just a pull',
                :body  => 'A little pull'
+        status 201
         json :html_url => "https://github.com/mislav/coral/pull/12"
       }
       """
@@ -327,6 +398,7 @@ Feature: hub pull-request
       """
       post('/repos/mislav/coral/pulls') {
         assert :head => 'mislav:feature'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -339,6 +411,7 @@ Feature: hub pull-request
       """
       post('/repos/mislav/coral/pulls') {
         assert :head => 'mojombo:feature'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -351,6 +424,7 @@ Feature: hub pull-request
       """
       post('/repos/mislav/coral/pulls') {
         assert :base => 'develop'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -365,6 +439,7 @@ Feature: hub pull-request
       post('/repos/mislav/coral/pulls') {
         assert :base => 'develop',
                :head => 'mislav:master'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -377,6 +452,7 @@ Feature: hub pull-request
       """
       post('/repos/mojombo/coral/pulls') {
         assert :base => 'develop'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -389,6 +465,7 @@ Feature: hub pull-request
       """
       post('/repos/mojombo/coralify/pulls') {
         assert :base => 'develop'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -411,6 +488,7 @@ Feature: hub pull-request
       """
       post('/repos/mislav/coral/pulls') {
         assert :head => 'mislav:feature'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -439,7 +517,8 @@ Feature: hub pull-request
     Given the GitHub API server:
       """
       post('/repos/mislav/coral/pulls') {
-        assert :issue => '92'
+        assert :issue => 92
+        status 201
         json :html_url => "https://github.com/mislav/coral/pull/92"
       }
       """
@@ -455,7 +534,8 @@ Feature: hub pull-request
     Given the GitHub API server:
       """
       post('/repos/mislav/coral/pulls') {
-        assert :issue => '92'
+        assert :issue => 92
+        status 201
         json :html_url => "https://github.com/mislav/coral/pull/92"
       }
       """
@@ -475,6 +555,7 @@ Feature: hub pull-request
       post('/api/v3/repos/mislav/coral/pulls', :host_name => 'git.my.org') {
         assert :base => 'master',
                :head => 'mislav:master'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -491,6 +572,7 @@ Feature: hub pull-request
       post('/api/v3/repos/mislav/coral/pulls', :host_name => 'git.my.org') {
         assert :base => 'master',
                :head => 'mislav:feature'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -507,6 +589,7 @@ Feature: hub pull-request
         assert :base  => 'master',
                :head  => 'github:feature',
                :title => 'hereyougo'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -523,6 +606,7 @@ Feature: hub pull-request
         assert :base  => 'master',
                :head  => 'Mislav:feature',
                :title => 'hereyougo'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -539,6 +623,7 @@ Feature: hub pull-request
         assert :base  => 'master',
                :head  => 'mislav:feature',
                :title => 'hereyougo'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -554,6 +639,7 @@ Feature: hub pull-request
         assert :base  => 'master',
                :head  => 'mislav:master',
                :title => 'hereyougo'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -564,6 +650,7 @@ Feature: hub pull-request
     Given the GitHub API server:
       """
       post('/repos/mislav/coral/pulls') {
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -578,6 +665,7 @@ Feature: hub pull-request
       post('/repos/mislav/coral/pulls') {
         assert :base  => 'master',
                :head  => 'mislav:feature'
+        status 201
         json :html_url => "the://url"
       }
       """
@@ -590,26 +678,28 @@ Feature: hub pull-request
       """
       post('/repos/mislav/coral/pulls') {
         assert :head  => "mislav:feat'ure"
+        status 201
         json :html_url => "the://url"
       }
       """
     When I successfully run `hub pull-request -m hereyougo`
     Then the output should contain exactly "the://url\n"
 
-  Scenario: Pull request with assignee
+  Scenario: Pull request with assignees
     Given I am on the "feature" branch with upstream "origin/feature"
     Given the GitHub API server:
       """
       post('/repos/mislav/coral/pulls') {
         assert :head  => "mislav:feature"
+        status 201
         json :html_url => "the://url", :number => 1234
       }
       patch('/repos/mislav/coral/issues/1234') {
-        assert :assignee => "mislav", :labels => nil
+        assert :assignees => ["mislav", "josh", "pcorpet"], :labels => nil
         json :html_url => "the://url"
       }
       """
-    When I successfully run `hub pull-request -m hereyougo -a mislav`
+    When I successfully run `hub pull-request -m hereyougo -a mislav,josh -apcorpet`
     Then the output should contain exactly "the://url\n"
 
   Scenario: Pull request with milestone
@@ -618,6 +708,7 @@ Feature: hub pull-request
       """
       post('/repos/mislav/coral/pulls') {
         assert :head  => "mislav:feature"
+        status 201
         json :html_url => "the://url", :number => 1234
       }
       patch('/repos/mislav/coral/issues/1234') {
@@ -634,14 +725,15 @@ Feature: hub pull-request
       """
       post('/repos/mislav/coral/pulls') {
         assert :head  => "mislav:feature"
+        status 201
         json :html_url => "the://url", :number => 1234
       }
       patch('/repos/mislav/coral/issues/1234') {
-        assert :labels => ["feature", "release"]
+        assert :labels => ["feature", "release", "docs"]
         json :html_url => "the://url"
       }
       """
-    When I successfully run `hub pull-request -m hereyougo -l feature,release`
+    When I successfully run `hub pull-request -m hereyougo -l feature,release -ldocs`
     Then the output should contain exactly "the://url\n"
 
   Scenario: Pull request to a fetch-only upstream
@@ -654,8 +746,50 @@ Feature: hub pull-request
         assert :base  => 'master',
                :head  => 'mislav:master',
                :title => 'hereyougo'
+        status 201
         json :html_url => "the://url"
       }
       """
     When I successfully run `hub pull-request -m hereyougo`
     Then the output should contain exactly "the://url\n"
+
+  Scenario: Pull request with redirect
+    Given the "origin" remote has url "https://github.com/mislav/coral.git"
+    And I am on the "feature" branch pushed to "origin/feature"
+    Given the GitHub API server:
+      """
+      get('/repos/mislav/coral') {
+        redirect 'https://api.github.com/repositories/12345', 301
+      }
+      get('/repositories/12345') {
+        json :name => 'coralify', :owner => { :login => 'coral-org' }
+      }
+      post('/repos/mislav/coral/pulls') {
+        redirect 'https://api.github.com/repositories/12345', 307
+      }
+      post('/repositories/12345', :host_name => 'api.github.com') {
+        assert :base  => 'master',
+               :head  => 'coral-org:feature',
+               :title => 'hereyougo'
+        status 201
+        json :html_url => "the://url"
+      }
+      """
+    When I successfully run `hub pull-request -m hereyougo`
+    Then the output should contain exactly "the://url\n"
+
+  Scenario: Redirect to another host is not followed
+    Given the "origin" remote has url "https://github.com/mislav/coral.git"
+    And I am on the "feature" branch pushed to "origin/feature"
+    Given the GitHub API server:
+      """
+      post('/repos/mislav/coral/pulls') {
+        redirect 'https://disney.com/mouse', 307
+      }
+      """
+    When I run `hub pull-request -m hereyougo`
+    Then the stderr should contain exactly:
+      """
+      Error creating pull request: Temporary Redirect (HTTP 307)
+      Refused to follow redirect to https://disney.com/mouse\n
+      """

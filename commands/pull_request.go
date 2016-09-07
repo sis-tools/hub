@@ -3,20 +3,20 @@ package commands
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/github/hub/git"
 	"github.com/github/hub/github"
 	"github.com/github/hub/utils"
-	"github.com/octokit/go-octokit/octokit"
 )
 
 var cmdPullRequest = &Command{
 	Run: pullRequest,
 	Usage: `
-pull-request [-fo] [-b <BASE>] [-h <HEAD>] [-a <USER>] [-M <MILESTONE>] [-l <LABELS>]
+pull-request [-fo] [-b <BASE>] [-h <HEAD>] [-a <USERS>] [-M <MILESTONE>] [-l <LABELS>]
 pull-request -m <MESSAGE>
-pull-request -F <FILE>
+pull-request -F <FILE> [--edit]
 pull-request -i <ISSUE>
 `,
 	Long: `Create a GitHub pull request.
@@ -32,6 +32,9 @@ pull-request -i <ISSUE>
 	-F, --file <FILE>
 		Read the pull request title and description from <FILE>.
 
+	-e, --edit
+		Further edit the contents of <FILE> in a text editor before submitting.
+
 	-i, --issue <ISSUE>, <ISSUE-URL>
 		(Deprecated) Convert <ISSUE> to a pull request.
 
@@ -45,8 +48,8 @@ pull-request -i <ISSUE>
 	-h, --head <HEAD>
 		The head branch in "[OWNER:]BRANCH" format. Defaults to the current branch.
 
-	-a, --assign <USER>
-		Assign GitHub <USER> to this pull request.
+	-a, --assign <USERS>
+		A comma-separated list of GitHub handles to assign to this pull request.
 
 	-M, --milestone <ID>
 		Add this pull request to a GitHub milestone with id <ID>.
@@ -65,12 +68,16 @@ var (
 	flagPullRequestHead,
 	flagPullRequestIssue,
 	flagPullRequestMessage,
-	flagPullRequestAssignee,
-	flagPullRequestLabels,
 	flagPullRequestFile string
+
 	flagPullRequestBrowse,
+	flagPullRequestEdit,
 	flagPullRequestForce bool
+
 	flagPullRequestMilestone uint64
+
+	flagPullRequestAssignees,
+	flagPullRequestLabels listFlag
 )
 
 func init() {
@@ -79,11 +86,12 @@ func init() {
 	cmdPullRequest.Flag.StringVarP(&flagPullRequestIssue, "issue", "i", "", "ISSUE")
 	cmdPullRequest.Flag.BoolVarP(&flagPullRequestBrowse, "browse", "o", false, "BROWSE")
 	cmdPullRequest.Flag.StringVarP(&flagPullRequestMessage, "message", "m", "", "MESSAGE")
+	cmdPullRequest.Flag.BoolVarP(&flagPullRequestEdit, "edit", "e", false, "EDIT")
 	cmdPullRequest.Flag.BoolVarP(&flagPullRequestForce, "force", "f", false, "FORCE")
 	cmdPullRequest.Flag.StringVarP(&flagPullRequestFile, "file", "F", "", "FILE")
-	cmdPullRequest.Flag.StringVarP(&flagPullRequestAssignee, "assign", "a", "", "USER")
+	cmdPullRequest.Flag.VarP(&flagPullRequestAssignees, "assign", "a", "USERS")
 	cmdPullRequest.Flag.Uint64VarP(&flagPullRequestMilestone, "milestone", "M", 0, "MILESTONE")
-	cmdPullRequest.Flag.StringVarP(&flagPullRequestLabels, "labels", "l", "", "LABELS")
+	cmdPullRequest.Flag.VarP(&flagPullRequestLabels, "labels", "l", "LABELS")
 
 	CmdRunner.Use(cmdPullRequest)
 }
@@ -102,6 +110,7 @@ func pullRequest(cmd *Command, args *Args) {
 	if err != nil {
 		utils.Check(github.FormatError("creating pull request", err))
 	}
+	client := github.NewClientWithHost(host)
 
 	trackedBranch, headProject, err := localRepo.RemoteBranchAndProject(host.User, false)
 	utils.Check(err)
@@ -153,8 +162,10 @@ func pullRequest(cmd *Command, args *Args) {
 		}
 	}
 
-	title, body, err := getTitleAndBodyFromFlags(flagPullRequestMessage, flagPullRequestFile)
-	utils.Check(err)
+	if headRepo, err := client.Repository(headProject); err == nil {
+		headProject.Owner = headRepo.Owner.Login
+		headProject.Name = headRepo.Name
+	}
 
 	fullBase := fmt.Sprintf("%s:%s", baseProject.Owner, base)
 	fullHead := fmt.Sprintf("%s:%s", headProject.Owner, head)
@@ -169,7 +180,14 @@ func pullRequest(cmd *Command, args *Args) {
 	}
 
 	var editor *github.Editor
-	if title == "" && flagPullRequestIssue == "" {
+	var title, body string
+
+	if cmd.FlagPassed("message") {
+		title, body = readMsg(flagPullRequestMessage)
+	} else if cmd.FlagPassed("file") {
+		title, body, editor, err = readMsgFromFile(flagPullRequestFile, flagPullRequestEdit, "PULLREQ", "pull request")
+		utils.Check(err)
+	} else if flagPullRequestIssue == "" {
 		baseTracking := base
 		headTracking := head
 
@@ -184,7 +202,7 @@ func pullRequest(cmd *Command, args *Args) {
 			headTracking = fmt.Sprintf("%s/%s", remote.Name, head)
 		}
 
-		message, err := pullRequestChangesMessage(baseTracking, headTracking, fullBase, fullHead)
+		message, err := createPullRequestMessage(baseTracking, headTracking, fullBase, fullHead)
 		utils.Check(err)
 
 		editor, err = github.NewEditor("PULLREQ", "pull request", message)
@@ -203,17 +221,21 @@ func pullRequest(cmd *Command, args *Args) {
 		args.Before(fmt.Sprintf("Would request a pull request to %s from %s", fullBase, fullHead), "")
 		pullRequestURL = "PULL_REQUEST_URL"
 	} else {
-		var (
-			pr  *octokit.PullRequest
-			err error
-		)
-
-		client := github.NewClientWithHost(host)
-		if title != "" {
-			pr, err = client.CreatePullRequest(baseProject, base, fullHead, title, body)
-		} else if flagPullRequestIssue != "" {
-			pr, err = client.CreatePullRequestForIssue(baseProject, base, fullHead, flagPullRequestIssue)
+		params := map[string]interface{}{
+			"base": base,
+			"head": fullHead,
 		}
+
+		if title != "" {
+			params["title"] = title
+			if body != "" {
+				params["body"] = body
+			}
+		} else {
+			issueNum, _ := strconv.Atoi(flagPullRequestIssue)
+			params["issue"] = issueNum
+		}
+		pr, err := client.CreatePullRequest(baseProject, params)
 
 		if err == nil && editor != nil {
 			defer editor.DeleteFile()
@@ -221,22 +243,17 @@ func pullRequest(cmd *Command, args *Args) {
 
 		utils.Check(err)
 
-		pullRequestURL = pr.HTMLURL
+		pullRequestURL = pr.HtmlUrl
 
-		if flagPullRequestAssignee != "" || flagPullRequestMilestone > 0 ||
-			flagPullRequestLabels != "" {
+		if len(flagPullRequestAssignees) > 0 || flagPullRequestMilestone > 0 ||
+			len(flagPullRequestLabels) > 0 {
 
-			labels := []string{}
-			for _, label := range strings.Split(flagPullRequestLabels, ",") {
-				if label != "" {
-					labels = append(labels, label)
-				}
+			params := map[string]interface{}{
+				"labels":    flagPullRequestLabels,
+				"assignees": flagPullRequestAssignees,
 			}
-
-			params := octokit.IssueParams{
-				Assignee:  flagPullRequestAssignee,
-				Milestone: flagPullRequestMilestone,
-				Labels:    labels,
+			if flagPullRequestMilestone > 0 {
+				params["milestone"] = flagPullRequestMilestone
 			}
 
 			err = client.UpdateIssue(baseProject, pr.Number, params)
@@ -258,7 +275,7 @@ func pullRequest(cmd *Command, args *Args) {
 	}
 }
 
-func pullRequestChangesMessage(base, head, fullBase, fullHead string) (string, error) {
+func createPullRequestMessage(base, head, fullBase, fullHead string) (string, error) {
 	var (
 		defaultMsg string
 		commitLogs string
@@ -275,6 +292,18 @@ func pullRequestChangesMessage(base, head, fullBase, fullHead string) (string, e
 		commitLogs, err = git.Log(base, head)
 		if err != nil {
 			return "", err
+		}
+	}
+
+	if template := github.GetPullRequestTemplate(); template != "" {
+		if defaultMsg == "" {
+			defaultMsg = "\n\n" + template
+		} else {
+			parts := strings.SplitN(defaultMsg, "\n\n", 2)
+			defaultMsg = parts[0] + "\n\n" + template
+			if len(parts) > 1 && parts[1] != "" {
+				defaultMsg = defaultMsg + "\n\n" + parts[1]
+			}
 		}
 	}
 
