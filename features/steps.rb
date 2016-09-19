@@ -82,6 +82,17 @@ Given(/^there is a commit named "([^"]+)"$/) do |name|
   run_silent %(git reset --quiet --hard HEAD^)
 end
 
+Given(/^there is a git FETCH_HEAD$/) do
+  empty_commit
+  empty_commit
+  in_current_dir do
+    File.open(".git/FETCH_HEAD", "w") do |fetch_head|
+      fetch_head.puts "%s\t\t'refs/heads/made-up' of git://github.com/made/up.git" % `git rev-parse HEAD`.chomp
+    end
+  end
+  run_silent %(git reset --quiet --hard HEAD^)
+end
+
 When(/^I make (a|\d+) commits?(?: with message "([^"]+)")?$/) do |num, msg|
   num = num == 'a' ? 1 : num.to_i
   num.times { empty_commit(msg) }
@@ -105,20 +116,19 @@ Given(/^the "([^"]+)" branch is pushed to "([^"]+)"$/) do |name, upstream|
 end
 
 Given(/^I am on the "([^"]+)" branch(?: (pushed to|with upstream) "([^"]+)")?$/) do |name, type, upstream|
+  run_silent %(git checkout --quiet -b #{shell_escape name})
   empty_commit
+
   if upstream
-    if upstream =~ /^refs\//
-      full_upstream = ".git/#{upstream}"
-    else
-      full_upstream = ".git/refs/remotes/#{upstream}"
+    unless upstream == 'refs/heads/master'
+      full_upstream = upstream.start_with?('refs/') ? upstream : "refs/remotes/#{upstream}"
+      run_silent %(git update-ref #{shell_escape full_upstream} HEAD)
     end
-    in_current_dir do
-      FileUtils.mkdir_p File.dirname(full_upstream)
-      FileUtils.cp '.git/refs/heads/master', full_upstream
-    end unless upstream == 'refs/heads/master'
+
+    if type == 'with upstream'
+      run_silent %(git branch --set-upstream-to #{shell_escape upstream})
+    end
   end
-  track = type == 'pushed to' ? '--no-track' : '--track'
-  run_silent %(git checkout --quiet -B #{shell_escape name} #{track} #{shell_escape upstream})
 end
 
 Given(/^the default branch for "([^"]+)" is "([^"]+)"$/) do |remote, branch|

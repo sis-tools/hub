@@ -8,13 +8,14 @@ import (
 
 	"github.com/github/hub/git"
 	"github.com/github/hub/github"
+	"github.com/github/hub/ui"
 	"github.com/github/hub/utils"
 )
 
 var cmdPullRequest = &Command{
 	Run: pullRequest,
 	Usage: `
-pull-request [-fo] [-b <BASE>] [-h <HEAD>] [-a <USERS>] [-M <MILESTONE>] [-l <LABELS>]
+pull-request [-foc] [-b <BASE>] [-h <HEAD>] [-a <USERS>] [-M <MILESTONE>] [-l <LABELS>]
 pull-request -m <MESSAGE>
 pull-request -F <FILE> [--edit]
 pull-request -i <ISSUE>
@@ -40,6 +41,9 @@ pull-request -i <ISSUE>
 
 	-o, --browse
 		Open the new pull request in a web browser.
+
+	-c, --copy
+		Put the URL of the new pull request to clipboard instead of printing it.
 
 	-b, --base <BASE>
 		The base branch in "[OWNER:]BRANCH" format. Defaults to the default branch
@@ -71,6 +75,7 @@ var (
 	flagPullRequestFile string
 
 	flagPullRequestBrowse,
+	flagPullRequestCopy,
 	flagPullRequestEdit,
 	flagPullRequestForce bool
 
@@ -85,6 +90,7 @@ func init() {
 	cmdPullRequest.Flag.StringVarP(&flagPullRequestHead, "head", "h", "", "HEAD")
 	cmdPullRequest.Flag.StringVarP(&flagPullRequestIssue, "issue", "i", "", "ISSUE")
 	cmdPullRequest.Flag.BoolVarP(&flagPullRequestBrowse, "browse", "o", false, "BROWSE")
+	cmdPullRequest.Flag.BoolVarP(&flagPullRequestCopy, "copy", "c", false, "COPY")
 	cmdPullRequest.Flag.StringVarP(&flagPullRequestMessage, "message", "m", "", "MESSAGE")
 	cmdPullRequest.Flag.BoolVarP(&flagPullRequestEdit, "edit", "e", false, "EDIT")
 	cmdPullRequest.Flag.BoolVarP(&flagPullRequestForce, "force", "f", false, "FORCE")
@@ -245,34 +251,29 @@ func pullRequest(cmd *Command, args *Args) {
 
 		pullRequestURL = pr.HtmlUrl
 
-		if len(flagPullRequestAssignees) > 0 || flagPullRequestMilestone > 0 ||
-			len(flagPullRequestLabels) > 0 {
+		params = map[string]interface{}{}
+		if len(flagPullRequestLabels) > 0 {
+			params["labels"] = flagPullRequestLabels
+		}
+		if len(flagPullRequestAssignees) > 0 {
+			params["assignees"] = flagPullRequestAssignees
+		}
+		if flagPullRequestMilestone > 0 {
+			params["milestone"] = flagPullRequestMilestone
+		}
 
-			params := map[string]interface{}{
-				"labels":    flagPullRequestLabels,
-				"assignees": flagPullRequestAssignees,
-			}
-			if flagPullRequestMilestone > 0 {
-				params["milestone"] = flagPullRequestMilestone
-			}
-
+		if len(params) > 0 {
 			err = client.UpdateIssue(baseProject, pr.Number, params)
 			utils.Check(err)
 		}
 	}
 
-	if flagPullRequestBrowse {
-		launcher, err := utils.BrowserLauncher()
-		utils.Check(err)
-		args.Replace(launcher[0], "", launcher[1:]...)
-		args.AppendParams(pullRequestURL)
-	} else {
-		args.Replace("echo", "", pullRequestURL)
+	if flagPullRequestIssue != "" {
+		ui.Errorln("Warning: Issue to pull request conversion is deprecated and might not work in the future.")
 	}
 
-	if flagPullRequestIssue != "" {
-		args.After("echo", "Warning: Issue to pull request conversion is deprecated and might not work in the future.")
-	}
+	args.NoForward()
+	printBrowseOrCopy(args, pullRequestURL, flagPullRequestBrowse, flagPullRequestCopy)
 }
 
 func createPullRequestMessage(base, head, fullBase, fullHead string) (string, error) {

@@ -19,7 +19,7 @@ var (
 		Usage: `
 release [--include-drafts]
 release show <TAG>
-release create [-dp] [-a <FILE>] [-m <MESSAGE>|-F <FILE>] [-c <TARGET>] <TAG>
+release create [-dpoc] [-a <FILE>] [-m <MESSAGE>|-F <FILE>] [-t <TARGET>] <TAG>
 release edit [<options>] <TAG>
 `,
 		Long: `Manage GitHub releases.
@@ -72,7 +72,13 @@ With '--include-drafts', include draft releases in the listing.
 	-e, --edit
 		Further edit the contents of <FILE> in a text editor before submitting.
 
-	-c, --commitish <TARGET>
+	-o, --browse
+		Open the new release in a web browser.
+
+	-c, --copy
+		Put the URL of the new release to clipboard instead of printing it.
+
+	-t, --commitish <TARGET>
 		A commit SHA or branch name to attach the release to, only used if <TAG>
 		doesn't already exist (default: main branch).
 
@@ -109,6 +115,8 @@ hub(1), git-tag(1)
 	flagReleaseShowDownloads,
 	flagReleaseDraft,
 	flagReleaseEdit,
+	flagReleaseBrowse,
+	flagReleaseCopy,
 	flagReleasePrerelease bool
 
 	flagReleaseMessage,
@@ -126,10 +134,12 @@ func init() {
 	cmdCreateRelease.Flag.BoolVarP(&flagReleaseEdit, "edit", "e", false, "EDIT")
 	cmdCreateRelease.Flag.BoolVarP(&flagReleaseDraft, "draft", "d", false, "DRAFT")
 	cmdCreateRelease.Flag.BoolVarP(&flagReleasePrerelease, "prerelease", "p", false, "PRERELEASE")
+	cmdCreateRelease.Flag.BoolVarP(&flagReleaseBrowse, "browse", "o", false, "BROWSE")
+	cmdCreateRelease.Flag.BoolVarP(&flagReleaseCopy, "copy", "c", false, "COPY")
 	cmdCreateRelease.Flag.VarP(&flagReleaseAssets, "attach", "a", "ATTACH_ASSETS")
 	cmdCreateRelease.Flag.StringVarP(&flagReleaseMessage, "message", "m", "", "MESSAGE")
 	cmdCreateRelease.Flag.StringVarP(&flagReleaseFile, "file", "F", "", "FILE")
-	cmdCreateRelease.Flag.StringVarP(&flagReleaseCommitish, "commitish", "c", "", "COMMITISH")
+	cmdCreateRelease.Flag.StringVarP(&flagReleaseCommitish, "commitish", "t", "", "COMMITISH")
 
 	cmdEditRelease.Flag.BoolVarP(&flagReleaseEdit, "edit", "e", false, "EDIT")
 	cmdEditRelease.Flag.BoolVarP(&flagReleaseDraft, "draft", "d", false, "DRAFT")
@@ -137,7 +147,7 @@ func init() {
 	cmdEditRelease.Flag.VarP(&flagReleaseAssets, "attach", "a", "ATTACH_ASSETS")
 	cmdEditRelease.Flag.StringVarP(&flagReleaseMessage, "message", "m", "", "MESSAGE")
 	cmdEditRelease.Flag.StringVarP(&flagReleaseFile, "file", "F", "", "FILE")
-	cmdEditRelease.Flag.StringVarP(&flagReleaseCommitish, "commitish", "c", "", "COMMITISH")
+	cmdEditRelease.Flag.StringVarP(&flagReleaseCommitish, "commitish", "t", "", "COMMITISH")
 
 	cmdRelease.Use(cmdShowRelease)
 	cmdRelease.Use(cmdCreateRelease)
@@ -168,7 +178,7 @@ func listReleases(cmd *Command, args *Args) {
 		}
 	}
 
-	os.Exit(0)
+	args.NoForward()
 }
 
 func showRelease(cmd *Command, args *Args) {
@@ -209,7 +219,7 @@ func showRelease(cmd *Command, args *Args) {
 		}
 	}
 
-	os.Exit(0)
+	args.NoForward()
 }
 
 func downloadRelease(cmd *Command, args *Args) {
@@ -235,7 +245,7 @@ func downloadRelease(cmd *Command, args *Args) {
 		utils.Check(err)
 	}
 
-	os.Exit(0)
+	args.NoForward()
 }
 
 func downloadReleaseAsset(asset github.ReleaseAsset, gh *github.Client) (err error) {
@@ -309,21 +319,21 @@ func createRelease(cmd *Command, args *Args) {
 
 	var release *github.Release
 
+	args.NoForward()
 	if args.Noop {
 		ui.Printf("Would create release `%s' for %s with tag name `%s'\n", title, project, tagName)
 	} else {
 		release, err = gh.CreateRelease(project, params)
 		utils.Check(err)
 
-		ui.Println(release.HtmlUrl)
+		printBrowseOrCopy(args, release.HtmlUrl, flagReleaseBrowse, flagReleaseCopy)
 	}
-
-	uploadAssets(gh, release, flagReleaseAssets, args)
 
 	if editor != nil {
 		editor.DeleteFile()
 	}
-	os.Exit(0)
+
+	uploadAssets(gh, release, flagReleaseAssets, args)
 }
 
 func editRelease(cmd *Command, args *Args) {
@@ -403,15 +413,15 @@ func editRelease(cmd *Command, args *Args) {
 		} else {
 			release, err = gh.EditRelease(release, params)
 			utils.Check(err)
+		}
 
-			if editor != nil {
-				editor.DeleteFile()
-			}
+		if editor != nil {
+			editor.DeleteFile()
 		}
 	}
 
 	uploadAssets(gh, release, flagReleaseAssets, args)
-	os.Exit(0)
+	args.NoForward()
 }
 
 func uploadAssets(gh *github.Client, release *github.Release, assets []string, args *Args) {

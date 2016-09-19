@@ -123,15 +123,9 @@ func browse(command *Command, args *Args) {
 	}
 
 	pageUrl := project.WebURL("", "", path)
-	launcher, err := utils.BrowserLauncher()
-	utils.Check(err)
 
-	if flagBrowseURLOnly {
-		args.Replace("echo", pageUrl)
-	} else {
-		args.Replace(launcher[0], "", launcher[1:]...)
-		args.AppendParams(pageUrl)
-	}
+	args.NoForward()
+	printBrowseOrCopy(args, pageUrl, !flagBrowseURLOnly, false)
 }
 
 func branchInURL(branch *github.Branch) string {

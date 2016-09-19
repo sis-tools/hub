@@ -17,8 +17,8 @@ var (
 	cmdIssue = &Command{
 		Run: listIssues,
 		Usage: `
-issue [-a <ASSIGNEE>] [-c <CREATOR>] [-@ <USER] [-s <STATE>] [-f <FORMAT>] [-M <MILESTONE>] [-l <LABELS>] [-t <TIME>]
-issue create [-o] [-m <MESSAGE>|-F <FILE>] [-a <USERS>] [-M <MILESTONE>] [-l <LABELS>]
+issue [-a <ASSIGNEE>] [-c <CREATOR>] [-@ <USER] [-s <STATE>] [-f <FORMAT>] [-M <MILESTONE>] [-l <LABELS>] [-d <DATE>] [-o <SORT_KEY> [-^]]
+issue create [-oc] [-m <MESSAGE>|-F <FILE>] [-a <USERS>] [-M <MILESTONE>] [-l <LABELS>]
 `,
 		Long: `Manage GitHub issues for the current project.
 
@@ -109,6 +109,9 @@ With no arguments, show a list of open issues.
 	-o, --browse
 		Open the new issue in a web browser.
 
+	-c, --copy
+		Put the URL of the new issue to clipboard instead of printing it.
+
 	-M, --milestone <ID>
 		Display only issues for a GitHub milestone with id <ID>.
 
@@ -121,6 +124,12 @@ With no arguments, show a list of open issues.
 
 	-d, --since <DATE>
 		Display only issues updated on or after <DATE> in ISO 8601 format.
+
+	-o, --sort <SORT_KEY>
+		Sort displayed issues by "created" (default), "updated" or "comments".
+
+	-^ --sort-ascending
+		Sort by ascending dates instead of descending.
 `,
 	}
 
@@ -140,10 +149,13 @@ With no arguments, show a list of open issues.
 	flagIssueMentioned,
 	flagIssueLabelsFilter,
 	flagIssueSince,
+	flagIssueSort,
 	flagIssueFile string
 
 	flagIssueEdit,
-	flagIssueBrowse bool
+	flagIssueCopy,
+	flagIssueBrowse,
+	flagIssueSortAscending bool
 
 	flagIssueMilestone uint64
 
@@ -158,6 +170,7 @@ func init() {
 	cmdCreateIssue.Flag.VarP(&flagIssueLabels, "label", "l", "LABEL")
 	cmdCreateIssue.Flag.VarP(&flagIssueAssignees, "assign", "a", "ASSIGNEE")
 	cmdCreateIssue.Flag.BoolVarP(&flagIssueBrowse, "browse", "o", false, "BROWSE")
+	cmdCreateIssue.Flag.BoolVarP(&flagIssueCopy, "copy", "c", false, "COPY")
 	cmdCreateIssue.Flag.BoolVarP(&flagIssueEdit, "edit", "e", false, "EDIT")
 
 	cmdIssue.Flag.StringVarP(&flagIssueAssignee, "assignee", "a", "", "ASSIGNEE")
@@ -168,6 +181,8 @@ func init() {
 	cmdIssue.Flag.StringVarP(&flagIssueMentioned, "mentioned", "@", "", "USER")
 	cmdIssue.Flag.StringVarP(&flagIssueLabelsFilter, "labels", "l", "", "LABELS")
 	cmdIssue.Flag.StringVarP(&flagIssueSince, "since", "d", "", "DATE")
+	cmdIssue.Flag.StringVarP(&flagIssueSort, "sort", "o", "created", "SORT_KEY")
+	cmdIssue.Flag.BoolVarP(&flagIssueSortAscending, "sort-ascending", "^", false, "SORT_KEY")
 
 	cmdIssue.Use(cmdCreateIssue)
 	CmdRunner.Use(cmdIssue)
@@ -192,12 +207,17 @@ func listIssues(cmd *Command, args *Args) {
 			"creator":   flagIssueCreator,
 			"mentioned": flagIssueMentioned,
 			"labels":    flagIssueLabelsFilter,
+			"sort":      flagIssueSort,
 		}
 		filters := map[string]interface{}{}
 		for flag, filter := range flagFilters {
 			if cmd.FlagPassed(flag) {
 				filters[flag] = filter
 			}
+		}
+
+		if flagIssueSortAscending {
+			filters["direction"] = "asc"
 		}
 
 		if cmd.FlagPassed("since") {
@@ -228,7 +248,7 @@ func listIssues(cmd *Command, args *Args) {
 		}
 	}
 
-	os.Exit(0)
+	args.NoForward()
 }
 
 func formatIssue(issue github.Issue, format string, colorize bool) string {
@@ -361,40 +381,38 @@ func createIssue(cmd *Command, args *Args) {
 		utils.Check(err)
 	}
 
+	if editor != nil {
+		defer editor.DeleteFile()
+	}
+
 	if title == "" {
 		utils.Check(fmt.Errorf("Aborting creation due to empty issue title"))
 	}
 
 	params := map[string]interface{}{
-		"title":     title,
-		"body":      body,
-		"labels":    flagIssueLabels,
-		"assignees": flagIssueAssignees,
+		"title": title,
+		"body":  body,
+	}
+
+	if len(flagIssueLabels) > 0 {
+		params["labels"] = flagIssueLabels
+	}
+
+	if len(flagIssueAssignees) > 0 {
+		params["assignees"] = flagIssueAssignees
 	}
 
 	if flagIssueMilestone > 0 {
 		params["milestone"] = flagIssueMilestone
 	}
 
+	args.NoForward()
 	if args.Noop {
 		ui.Printf("Would create issue `%s' for %s\n", params["title"], project)
-		os.Exit(0)
 	} else {
 		issue, err := gh.CreateIssue(project, params)
 		utils.Check(err)
 
-		if editor != nil {
-			editor.DeleteFile()
-		}
-
-		if flagIssueBrowse {
-			launcher, err := utils.BrowserLauncher()
-			utils.Check(err)
-			args.Replace(launcher[0], "", launcher[1:]...)
-			args.AppendParams(issue.HtmlUrl)
-		} else {
-			ui.Println(issue.HtmlUrl)
-			os.Exit(0)
-		}
+		printBrowseOrCopy(args, issue.HtmlUrl, flagIssueBrowse, flagIssueCopy)
 	}
 }

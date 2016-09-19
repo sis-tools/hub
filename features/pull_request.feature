@@ -433,7 +433,7 @@ BODY
 
   Scenario: Implicit base by detecting main branch
     Given the default branch for "origin" is "develop"
-    And I am on the "master" branch
+    And I make a commit
     Given the GitHub API server:
       """
       post('/repos/mislav/coral/pulls') {
@@ -630,6 +630,24 @@ BODY
     When I successfully run `hub pull-request -m hereyougo`
     Then the output should contain exactly "the://url\n"
 
+  Scenario: Create pull request from branch on the personal fork, capitalized
+    Given the "origin" remote has url "git://github.com/LightAlf/FirstRepo.git"
+    And the "Kristinita" remote has url "git@github.com:Kristinita/FirstRepo.git"
+    And I am on the "add-py3kwarn" branch pushed to "Kristinita/add-py3kwarn"
+    And I am "Kristinita" on github.com with OAuth token "OTOKEN"
+    Given the GitHub API server:
+      """
+      post('/repos/LightAlf/FirstRepo/pulls') {
+        assert :base  => 'master',
+               :head  => 'Kristinita:add-py3kwarn',
+               :title => 'hereyougo'
+        status 201
+        json :html_url => "the://url"
+      }
+      """
+    When I successfully run `hub pull-request -m hereyougo`
+    Then the output should contain exactly "the://url\n"
+
   Scenario: Create pull request to "upstream" remote
     Given the "upstream" remote has url "git://github.com/github/coral.git"
     And I am on the "master" branch pushed to "origin/master"
@@ -659,6 +677,7 @@ BODY
 
   Scenario: Current branch is tracking local branch
     Given git "push.default" is set to "upstream"
+    And I make a commit
     And I am on the "feature" branch with upstream "refs/heads/master"
     Given the GitHub API server:
       """
@@ -695,7 +714,7 @@ BODY
         json :html_url => "the://url", :number => 1234
       }
       patch('/repos/mislav/coral/issues/1234') {
-        assert :assignees => ["mislav", "josh", "pcorpet"], :labels => nil
+        assert :assignees => ["mislav", "josh", "pcorpet"], :labels => :no
         json :html_url => "the://url"
       }
       """
@@ -729,7 +748,7 @@ BODY
         json :html_url => "the://url", :number => 1234
       }
       patch('/repos/mislav/coral/issues/1234') {
-        assert :labels => ["feature", "release", "docs"]
+        assert :labels => ["feature", "release", "docs"], :assignees => :no
         json :html_url => "the://url"
       }
       """

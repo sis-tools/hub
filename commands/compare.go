@@ -111,15 +111,9 @@ func compare(command *Command, args *Args) {
 
 	subpage := utils.ConcatPaths("compare", rangeQueryEscape(r))
 	url := project.WebURL("", "", subpage)
-	launcher, err := utils.BrowserLauncher()
-	utils.Check(err)
 
-	if flagCompareURLOnly {
-		args.Replace("echo", url)
-	} else {
-		args.Replace(launcher[0], "", launcher[1:]...)
-		args.AppendParams(url)
-	}
+	args.NoForward()
+	printBrowseOrCopy(args, url, !flagCompareURLOnly, false)
 }
 
 func parseCompareRange(r string) string {

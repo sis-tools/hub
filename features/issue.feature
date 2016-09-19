@@ -7,7 +7,9 @@ Feature: hub issue
     Given the GitHub API server:
     """
     get('/repos/github/hub/issues') {
-      assert :assignee => "Cornwe19"
+      assert :assignee => "Cornwe19",
+             :sort => nil,
+             :direction => nil
 
       json [
         { :number => 102,
@@ -80,11 +82,23 @@ Feature: hub issue
     """
     When I successfully run `hub issue -d 2016-08-18T09:11:32Z`
 
+  Scenario: Fetch issues sorted by number of comments ascending
+    Given the GitHub API server:
+    """
+    get('/repos/github/hub/issues') {
+      assert :sort => "comments"
+      assert :direction => "asc"
+
+      json []
+    }
+    """
+    When I successfully run `hub issue -o comments -^`
+
   Scenario: Fetch issues across multiple pages
     Given the GitHub API server:
     """
     get('/repos/github/hub/issues') {
-      assert :per_page => "100", :page => nil
+      assert :per_page => "100", :page => :no
       response.headers["Link"] = %(<https://api.github.com/repositories/12345?per_page=100&page=2>; rel="next")
       json [
         { :number => 102,
@@ -197,7 +211,7 @@ Feature: hub issue
       post('/repos/github/hub/issues') {
         assert :title => "Not workie, pls fix",
                :body => "",
-               :labels => nil
+               :labels => :no
 
         status 201
         json :html_url => "https://github.com/github/hub/issues/1337"
@@ -227,8 +241,8 @@ Feature: hub issue
       post('/repos/github/hub/issues') {
         assert :title => "hello",
                :body => "",
-               :milestone => nil,
-               :assignees => nil,
+               :milestone => :no,
+               :assignees => :no,
                :labels => ["wont fix", "docs", "nope"]
 
         status 201
@@ -249,7 +263,7 @@ Feature: hub issue
                :body => "",
                :milestone => 12,
                :assignees => ["mislav", "josh", "pcorpet"],
-               :labels => nil
+               :labels => :no
 
         status 201
         json :html_url => "https://github.com/github/hub/issues/1337"
